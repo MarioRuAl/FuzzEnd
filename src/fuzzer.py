@@ -7,7 +7,8 @@ import subprocess
 
 FLIP_RATIO = 0.01
 FLIP_ARRAY = [1 << i for i in range(8)]
-NUM_ITERATIONS = 10000
+NUM_ITERATIONS = 100000
+CRASH_DIR = "crashes"
 
 def read_pdf(pdf):
     try:
@@ -27,8 +28,6 @@ def bit_flip(datos):
 
     return datos
 
-
-
 def create_pdf(datos):
     path = "data/fuzzed.pdf"
     try:
@@ -38,25 +37,43 @@ def create_pdf(datos):
     except Exception as e:
         print(f"Error al escribir el PDF: {e}")
 
-
 def run_fuzzer(bytes_pdf):
+    os.makedirs(CRASH_DIR, exist_ok=True)
     for i in range(NUM_ITERATIONS):
         if i % 100 == 0:
             print(f"Iteration {i} of {NUM_ITERATIONS}")
-
-        mutated_bytes = bit_flip(bytes_pdf)
+        mutated_bytes = bit_flip(bytearray(bytes_pdf))
         create_pdf(mutated_bytes)
+        try:
+            process = subprocess.Popen(
+                ["pdfinfo", "data/fuzzed.pdf"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE
+            )
+           
+            try:
+                _, stderr = process.communicate(timeout=2)
+                returncode = process.returncode
+            except subprocess.TimeoutExpired:
+                process.kill()
+                _, stderr = process.communicate()
+                returncode = -1
+            
 
-        # Ejecutar pdfinfo
-        result = subprocess.run(["pdfinfo", "data/fuzzed.pdf"], capture_output=True, text=True)
-        stderr_output = result.stderr.lower()
-
-        # Guardar PDFs corruptos que generen un segfault o core dump
-        if "segmentation fault" in stderr_output or "core dumped" in stderr_output:
-            print(f"[!!!] Crash detected in iteration {i}!")
-            os.system(f"cp {"data/fuzzed.pdf"} {"crashes"}/crash_{i}.pdf")
-
-
+            if returncode == 139 or returncode == -11:
+                print(f"[!!!] Crash detected in iteration {i}!")
+                crash_path = f"{CRASH_DIR}/crash_{i}.pdf"
+                with open(crash_path, "wb") as f:
+                    f.write(mutated_bytes)
+            else:
+                stderr_str = stderr.decode('utf-8', errors='ignore').lower()
+                if "segmentation fault" in stderr_str or "segmentation" in stderr_str:
+                    print(f"[!!!] Crash detected in iteration {i}!")
+                    crash_path = f"{CRASH_DIR}/crash_{i}.pdf"
+                    with open(crash_path, "wb") as f:
+                        f.write(mutated_bytes)
+        except Exception as e:
+            print(f"Error ejecutando exif: {e}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
@@ -68,9 +85,5 @@ if __name__ == "__main__":
 
     if bytes_pdf is None:
         sys.exit(1)
-    
 
     run_fuzzer(bytes_pdf)
-
-    # mutated_bytes = bit_flip(bytes_pdf)
-    # create_pdf(mutated_bytes)
