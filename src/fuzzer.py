@@ -9,6 +9,20 @@ FLIP_RATIO = 0.01
 FLIP_ARRAY = [1 << i for i in range(8)]
 NUM_ITERATIONS = 100000
 CRASH_DIR = "crashes"
+OPTIONS = [0,1]
+
+MAGIC_VALS = [
+    [0xFF],
+    [0x7F],
+    [0x00],
+    [0xFF, 0xFF],           # 0xFFFF
+    [0x00, 0x00],           # 0x0000
+    [0xFF, 0xFF, 0xFF, 0xFF], # 0xFFFFFFFF
+    [0x00, 0x00, 0x00, 0x00], # 0x00000000
+    [0x00, 0x00, 0x00, 0x80], # 0x80000000
+    [0x00, 0x00, 0x00, 0x40], # 0x40000000
+    [0xFF, 0xFF, 0xFF, 0x7F], # 0x7FFFFFFF
+]
 
 def read_pdf(pdf):
     try:
@@ -28,6 +42,18 @@ def bit_flip(datos):
 
     return datos
 
+def apply_magic(datos):
+    idx = random.randint(8, len(datos) - 6)  
+    picked_magic = random.choice(MAGIC_VALS) 
+
+    for offset, val in enumerate(picked_magic):
+        if idx + offset < len(datos): 
+            datos[idx + offset] = val
+
+    return datos
+    
+      
+
 def create_pdf(datos):
     path = "data/fuzzed.pdf"
     try:
@@ -40,9 +66,15 @@ def create_pdf(datos):
 def run_fuzzer(bytes_pdf):
     os.makedirs(CRASH_DIR, exist_ok=True)
     for i in range(NUM_ITERATIONS):
-        if i % 100 == 0:
-            print(f"Iteration {i} of {NUM_ITERATIONS}")
-        mutated_bytes = bit_flip(bytearray(bytes_pdf))
+        if i % 500 == 0:
+            sys.stdout.write(f"\rIteration {i} of {NUM_ITERATIONS}")
+            sys.stdout.flush()
+        option = random.choice(OPTIONS)
+        if option == 1:
+            mutated_bytes = bit_flip(bytearray(bytes_pdf))
+        else:
+            mutated_bytes = apply_magic(bytearray(bytes_pdf))
+
         create_pdf(mutated_bytes)
         try:
             process = subprocess.Popen(
