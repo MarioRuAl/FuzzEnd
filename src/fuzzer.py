@@ -43,16 +43,17 @@ def bit_flip(datos):
     return datos
 
 def apply_magic(datos):
-    idx = random.randint(8, len(datos) - 6)  
-    picked_magic = random.choice(MAGIC_VALS) 
+    flips_number = max(1, int((len(datos) - 14) * FLIP_RATIO))
+    indexes = random.sample(range(8, len(datos) - 6), flips_number)
 
-    for offset, val in enumerate(picked_magic):
-        if idx + offset < len(datos): 
-            datos[idx + offset] = val
+    for idx in indexes:
+        picked_magic = random.choice(MAGIC_VALS)
+        for offset, val in enumerate(picked_magic):
+            if idx + offset < len(datos):
+                datos[idx + offset] = val
 
     return datos
-    
-      
+
 
 def create_pdf(datos):
     path = "data/fuzzed.pdf"
@@ -63,13 +64,15 @@ def create_pdf(datos):
     except Exception as e:
         print(f"Error al escribir el PDF: {e}")
 
+
 def run_fuzzer(bytes_pdf):
     os.makedirs(CRASH_DIR, exist_ok=True)
     for i in range(NUM_ITERATIONS):
-        if i % 500 == 0:
+        if i % 100 == 0:
             sys.stdout.write(f"\rIteration {i} of {NUM_ITERATIONS}")
             sys.stdout.flush()
         option = random.choice(OPTIONS)
+        #option = 1
         if option == 1:
             mutated_bytes = bit_flip(bytearray(bytes_pdf))
         else:
@@ -78,7 +81,7 @@ def run_fuzzer(bytes_pdf):
         create_pdf(mutated_bytes)
         try:
             process = subprocess.Popen(
-                ["pdfinfo", "data/fuzzed.pdf"],
+                ["pdfinfovul", "data/fuzzed.pdf"], 
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE
             )
@@ -93,20 +96,28 @@ def run_fuzzer(bytes_pdf):
             
 
             if returncode == 139 or returncode == -11:
-                print(f"[!!!] Crash detected in iteration {i}!")
-                crash_path = f"{CRASH_DIR}/crash_{i}.pdf"
+                print(f" [!!!] Crash detected in iteration {i}! con returncode {returncode}")
+                crash_path = f"{CRASH_DIR}/crash_{i}_option{option}.pdf"
                 with open(crash_path, "wb") as f:
                     f.write(mutated_bytes)
+
+            elif returncode == -1:
+                print(f" [???] TIMEOUT in iteration {i}!")
+                crash_path = f"timeout/crash_{i}.pdf"
+                with open(crash_path, "wb") as f:
+                    f.write(mutated_bytes)
+
             else:
                 stderr_str = stderr.decode('utf-8', errors='ignore').lower()
                 if "segmentation fault" in stderr_str or "segmentation" in stderr_str:
                     print(f"[!!!] Crash detected in iteration {i}!")
-                    crash_path = f"{CRASH_DIR}/crash_{i}.pdf"
+                    crash_path = f"{CRASH_DIR}/crash_{i}_option{option}.pdf"
                     with open(crash_path, "wb") as f:
                         f.write(mutated_bytes)
         except Exception as e:
             print(f"Error ejecutando exif: {e}")
 
+ 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print(f"Usage: {sys.argv[0]} <ruta_del_pdf>")
@@ -119,3 +130,4 @@ if __name__ == "__main__":
         sys.exit(1)
 
     run_fuzzer(bytes_pdf)
+
