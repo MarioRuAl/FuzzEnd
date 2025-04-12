@@ -6,6 +6,7 @@ import random
 import subprocess
 import re
 import shutil
+import datetime
 
 FLIP_RATIO = 0.01
 FLIP_ARRAY = [1 << i for i in range(8)]
@@ -14,10 +15,19 @@ CRASH_DIR = "crashes"
 UNIQUE_DIR = os.path.join(CRASH_DIR, "unicos")
 REPEATED_DIR = os.path.join(CRASH_DIR, "repetidos")
 TIMEOUT_DIR = os.path.join(CRASH_DIR, "timeout")
+INFORME_PATH = os.path.join(CRASH_DIR, "informe.txt")
 crash_functions = set()
 
 
 OPTIONS = [0,1]
+
+#CONTADORES PARA EL INFORME FINAL
+total_crashes = 0
+total_unique = 0
+total_repeated = 0
+total_timeout = 0
+bit_flip_crashes = 0
+magic_crashes = 0
 
 
 MAGIC_VALS = [
@@ -32,6 +42,27 @@ MAGIC_VALS = [
     [0x00, 0x00, 0x00, 0x40], # 0x40000000
     [0xFF, 0xFF, 0xFF, 0x7F], # 0x7FFFFFFF
 ]
+
+
+def generate_report(message):
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    report_message = f"{timestamp} - {message}"
+    with open(INFORME_PATH, "a") as f:
+        f.write(report_message + "\n")
+
+def final_part_report():
+    generate_report("Fuzzing finalizado.")
+    generate_report("Resultados:")
+    generate_report(f"Total de crashes: {total_crashes}")
+    generate_report(f"Total de crashes únicos: {total_unique}")
+    generate_report(f"Total de crashes repetidos: {total_repeated}")
+    generate_report(f"Total de timeouts: {total_timeout}")
+    generate_report(f"Total de crashes por bit flip: {bit_flip_crashes}")
+    generate_report(f"Total de crashes por magia: {magic_crashes}")
+    generate_report("Funciones de crash encontradas:")
+    for function in crash_functions:
+        generate_report(f"Función: - {function}")
+
 
 def read_pdf(pdf):
     try:
@@ -116,15 +147,19 @@ def classify_crash(crash_path, binary_path):
     
     shutil.move(crash_path, target_path)
 
-    return f"{'Repetido' if is_repeated else 'Único'}: {function_name}"
+    return f"{'Repetido' if is_repeated else 'Único'}: {function_name}", is_repeated
 
 
 def run_fuzzer(bytes_pdf):
+    global total_crashes, total_unique, total_repeated, total_timeout, bit_flip_crashes, magic_crashes
+
     os.makedirs(CRASH_DIR, exist_ok=True)
     os.makedirs(UNIQUE_DIR, exist_ok=True)
     os.makedirs(REPEATED_DIR, exist_ok=True)
     os.makedirs(TIMEOUT_DIR, exist_ok=True)
 
+    generate_report("Fuzzing iniciado.")
+    generate_report(f"PDF de entrada: {pdf}")
 
     for i in range(NUM_ITERATIONS):
         if i % 100 == 0:
@@ -162,8 +197,21 @@ def run_fuzzer(bytes_pdf):
                     f.write(mutated_bytes)
 
                 binary_path = "/usr/local/bin/pdfinfovul"  
-                classification = classify_crash(crash_path, binary_path)
-                print(f"→ {classification}")
+                total_crashes += 1
+                function_name, is_repeated = classify_crash(crash_path, binary_path)
+
+                if is_repeated: 
+                    total_repeated += 1
+                else:
+                    total_unique += 1
+
+                if option == 1:
+                    bit_flip_crashes += 1
+                else:
+                    magic_crashes += 1
+
+                print(f"→ {function_name}")
+                generate_report(f"Crash en iteración {i} - {function_name}")
                 
 
             elif returncode == -1:
@@ -171,17 +219,14 @@ def run_fuzzer(bytes_pdf):
                 crash_path = f"{TIMEOUT_DIR}/crash_{i}.pdf"
                 with open(crash_path, "wb") as f:
                     f.write(mutated_bytes)
+                total_timeout += 1
+                generate_report(f"Timeout en iteración {i}")
 
-            else:
-                stderr_str = stderr.decode('utf-8', errors='ignore').lower()
-                if "segmentation fault" in stderr_str or "segmentation" in stderr_str:
-                    print ("Extra")
-                    # print(f"[!!!] Crash detected in iteration {i}!")
-                    # crash_path = f"{CRASH_DIR}/crash_{i}_option{option}.pdf"
-                    # with open(crash_path, "wb") as f:
-                    #     f.write(mutated_bytes)
         except Exception as e:
             print(f"Error ejecutando pdfinfo: {e}")
+
+    final_part_report()
+
 
  
 if __name__ == "__main__":
