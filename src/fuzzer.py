@@ -19,7 +19,7 @@ INFORME_PATH = os.path.join(CRASH_DIR, "informe.txt")
 crash_functions = set()
 
 
-OPTIONS = [0,1]
+OPTIONS = [0,1, 2] # 0: bit_flip, 1: magic, 2: length
 
 #CONTADORES PARA EL INFORME FINAL
 total_crashes = 0
@@ -28,6 +28,7 @@ total_repeated = 0
 total_timeout = 0
 bit_flip_crashes = 0
 magic_crashes = 0
+length_crashes = 0
 
 
 MAGIC_VALS = [
@@ -59,6 +60,7 @@ def final_part_report():
     generate_report(f"Total de timeouts: {total_timeout}")
     generate_report(f"Total de crashes por bit flip: {bit_flip_crashes}")
     generate_report(f"Total de crashes por magia: {magic_crashes}")
+    generate_report(f"Total de crashes por length: {length_crashes}")
     generate_report("Funciones de crash encontradas:")
     for function in crash_functions:
         generate_report(f"Función: - {function}")
@@ -93,6 +95,60 @@ def apply_magic(datos):
                 datos[idx + offset] = val
 
     return datos
+
+
+def mutate_pdf_length(pdf_bytes):
+    pdf_data = bytearray(pdf_bytes)
+    length_pattern = rb'/Length\s+(\d+)\s+.*?stream[\r\n]'
+    
+    try:
+        matches = list(re.finditer(length_pattern, pdf_data, re.DOTALL))
+        if not matches:
+            return pdf_bytes
+        
+        to_modify = random.sample(matches, min(len(matches), random.randint(1, max(1, len(matches) // 2))))
+        
+        for match in to_modify:
+            try:
+                current_length = int(match.group(1))
+                
+                technique = random.randint(1, 10)
+                
+                if technique == 1:
+                    new_length = 0
+                elif technique == 2:
+                    new_length = -1 * random.randint(1, 1000)
+                elif technique == 3:
+                    new_length = max(0, current_length - random.randint(1, min(100, current_length)))
+                elif technique == 4:
+                    new_length = current_length + random.randint(1, 100)
+                elif technique == 5:
+                    new_length = current_length * random.randint(2, 1000)
+                elif technique == 6:
+                    new_length = 2**31 - 1
+                elif technique == 7:
+                    new_length = 65535
+                elif technique == 8:
+                    new_length = current_length + 1
+                elif technique == 9:
+                    new_length = -2**31
+                else:
+                    new_length = random.randint(0, max(1000, current_length * 2))
+                
+                new_length_bytes = str(new_length).encode()
+                
+                start_pos = match.start(1)
+                end_pos = match.end(1)
+                pdf_data[start_pos:end_pos] = new_length_bytes
+                
+            except ValueError:
+                continue
+            
+        return bytes(pdf_data)
+    
+    except Exception as e:
+        print(f"Error en mutate_pdf_length: {e}")
+        return pdf_bytes
 
 
 def create_pdf(datos):
@@ -150,16 +206,19 @@ def classify_crash(crash_path, binary_path):
     return f"{'Repetido' if is_repeated else 'Único'}: {function_name}", is_repeated
 
 
-def run_fuzzer(bytes_pdf):
-    global total_crashes, total_unique, total_repeated, total_timeout, bit_flip_crashes, magic_crashes
+def run_fuzzer(pdf_path, bytes_pdf):
+    global total_crashes, total_unique, total_repeated, total_timeout, bit_flip_crashes, magic_crashes, length_crashes
 
     os.makedirs(CRASH_DIR, exist_ok=True)
     os.makedirs(UNIQUE_DIR, exist_ok=True)
     os.makedirs(REPEATED_DIR, exist_ok=True)
     os.makedirs(TIMEOUT_DIR, exist_ok=True)
 
+    if os.path.exists(INFORME_PATH):
+        os.remove(INFORME_PATH)
+
     generate_report("Fuzzing iniciado.")
-    generate_report(f"PDF de entrada: {pdf}")
+    generate_report(f"PDF de entrada: {pdf_path}")
 
     for i in range(NUM_ITERATIONS):
         if i % 100 == 0:
@@ -167,11 +226,13 @@ def run_fuzzer(bytes_pdf):
             sys.stdout.flush()
             
         option = random.choice(OPTIONS)
-        # option = 0
-        if option == 1:
+        # option = 2
+        if option == 0:
             mutated_bytes = bit_flip(bytearray(bytes_pdf))
-        else:
+        elif option == 1:
             mutated_bytes = apply_magic(bytearray(bytes_pdf))
+        else:
+            mutated_bytes = mutate_pdf_length(bytearray(bytes_pdf))
 
         create_pdf(mutated_bytes)
         try:
@@ -205,13 +266,17 @@ def run_fuzzer(bytes_pdf):
                 else:
                     total_unique += 1
 
-                if option == 1:
+                if option == 0:
                     bit_flip_crashes += 1
-                else:
+                elif option == 1:
                     magic_crashes += 1
+                else:
+                    length_crashes += 1
 
                 print(f"→ {function_name}")
-                generate_report(f"Crash en iteración {i} - {function_name}")
+
+                if not is_repeated:
+                    generate_report(f"Crash en iteración {i} - {function_name}")
                 
 
             elif returncode == -1:
@@ -240,5 +305,4 @@ if __name__ == "__main__":
     if bytes_pdf is None:
         sys.exit(1)
 	
-    run_fuzzer(bytes_pdf)
-
+    run_fuzzer(pdf, bytes_pdf)
